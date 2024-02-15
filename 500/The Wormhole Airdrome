@@ -1,0 +1,343 @@
+stack_last = functools.partial(qml.math.stack, axis=-1)
+
+Operation = qml.operation.Operation
+
+class fSim(Operation):
+    num_params = 2
+    num_wires = 2
+    par_domain = "R"
+    
+    ndim_params = (0,0)
+    
+    #grad_method = "A"
+    #parameter_frequencies = [(1,), (1,)]
+    
+    def __init__(self, theta, phi, wires, id=None):
+        super().__init__(theta, phi, wires=wires, id=id)
+
+    @staticmethod
+    def compute_matrix(theta, phi):
+        
+        c = qml.math.cos(theta)
+        s = qml.math.sin(theta)
+        
+        one = qml.math.ones_like(phi)
+        c = c * one
+        s = s * one
+        
+        mat = [[1, 0, 0, 0],
+                [0, c, -1j*s, 0],[0,-1j*s, c, 0], [0,0,0, qml.math.exp(-1j*phi)]]
+
+        return qml.math.stack([stack_last(row) for row in mat], axis=-2)
+    
+class SQRTX(Operation):
+    
+    num_params = 0
+    num_wires = 1
+    
+    def __init__(self, wires, id=None):
+        super().__init__(wires=wires, id=id)
+    
+    @staticmethod
+    def compute_decomposition(wires):
+        return [qml.RX(np.pi/2, wires=wires)]
+    
+class SQRTY(Operation):
+    
+    num_params = 0
+    num_wires = 1
+    
+    def __init__(self, wires, id=None):
+        super().__init__(wires=wires, id=id)
+    
+    @staticmethod
+    def compute_decomposition(wires):
+        return [qml.RY(np.pi/2, wires=wires)]
+    
+class Wormhole(Operation):
+    
+    num_params = 1
+    num_wires = 4
+    
+    def __init__(self, g, wires, id=None):
+        super().__init__(g, wires = wires, id=id)
+    
+    @staticmethod
+    def compute_decomposition(g, wires):
+        return [qml.IsingZZ(-g, wires=[wires[0], wires[3]]), qml.IsingZZ(-g, wires = [wires[1], wires[2]])]
+
+def Z_a(wires):
+    # i global phase to be Z
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTX(wires)
+    SQRTX(wires)
+
+def Z_b(wires):
+    # -i global phase to be Z
+    SQRTX(wires)
+    SQRTX(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+
+def Hadamard(wires):
+    # i phase factor to be H
+    SQRTY(wires) 
+    SQRTX(wires)
+    SQRTX(wires)
+
+def RYminuspihalfb(wires):
+    # - phase factor to be RY(-π/2)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    
+def RYminuspihalf(wires):
+    # - phase factor to be RY(-π/2)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    
+def RZminuspihalf(wires):
+    # Exact 
+    SQRTX(wires)
+    SQRTX(wires)
+    SQRTX(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTX(wires)
+    
+def RZpluspihalf(wires):
+    # Exact 
+    SQRTX(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTY(wires)
+    SQRTX(wires)
+    SQRTX(wires)
+    SQRTX(wires)
+
+def RXminuspihalf(wires):
+    # -1 factor 
+    SQRTY(wires)
+    SQRTX(wires)
+    SQRTY(wires)
+    SQRTX(wires)
+    SQRTY(wires)
+    
+# Verify all single qubit gates constructed:
+Basis1 = [np.array([1,0]),np.array([0,1])]
+dev_1qubit = qml.device("default.qubit",wires=1)
+
+@qml.qnode(dev_1qubit)
+def test_1qubit(state,gate):
+    qml.StatePrep(state,wires=[0])
+    gate(0)
+    return qml.state()
+
+pool_1qubit_gates = [Z_a,Z_b,Hadamard,RYminuspihalfb,RYminuspihalf,RZminuspihalf,RZpluspihalf,RXminuspihalf]
+phase_factors_1qubit_gates = [1j, -1j, 1j, -1, 1, 1, 1, -1]
+
+true_matrices_1qubits_gates = [
+    qml.PauliZ.compute_matrix()
+]*2+[
+    qml.Hadamard.compute_matrix(),
+    qml.PauliRot.compute_matrix(-np.pi/2,'Y'),
+    qml.PauliRot.compute_matrix(-np.pi/2,'Y'),
+    qml.PauliRot.compute_matrix(-np.pi/2,'Z'),
+    qml.PauliRot.compute_matrix(+np.pi/2,'Z'),
+    qml.PauliRot.compute_matrix(-np.pi/2,'X')
+]
+
+for k,(test_gate,true_gate) in enumerate(zip(pool_1qubit_gates,true_matrices_1qubits_gates)):
+    test_gate_sim = np.array([test_1qubit(basis_state,test_gate)*phase_factors_1qubit_gates[k] for basis_state in Basis1]).T
+    assert np.allclose(
+        true_gate,
+        test_gate_sim
+    ), f"failed at {k}: {true_gate} VS {test_gate_sim}"
+
+def SQRTSWAP(wires):
+    wire1, wire2 = wires
+    for _ in range(2):
+        SQRTX(wire1)
+        SQRTX(wire1)
+        SQRTX(wire2)
+        SQRTX(wire2)
+        fSim(theta=np.pi/8,phi=np.pi/4,wires=wires)
+
+def CNOTa(wires):
+    # i factor to be CNOT
+    wire1, wire2 = wires
+
+    SQRTY(wire2)
+    
+    SQRTSWAP(wires)
+    Z_a(wire1)
+    SQRTSWAP(wires)
+
+    RZminuspihalf(wire1)
+    RZminuspihalf(wire2)
+    RYminuspihalf(wire2)
+
+def CNOTb(wires):
+    # -i factor to be CNOT
+    wire1, wire2 = wires
+
+    SQRTY(wire2)
+    
+    SQRTSWAP(wires)
+    Z_b(wire1)
+    SQRTSWAP(wires)
+
+    RZminuspihalf(wire1)
+    RZminuspihalf(wire2)
+    RYminuspihalf(wire2)
+
+def CNOTc(wires):
+    # i factor to be CNOT + - factor: -i
+    wire1, wire2 = wires
+
+    SQRTY(wire2)
+    
+    SQRTSWAP(wires)
+    Z_a(wire1)
+    SQRTSWAP(wires)
+
+    RZminuspihalf(wire1)
+    RZminuspihalf(wire2)
+    RYminuspihalfb(wire2)
+
+def CNOTd(wires):
+    # -i factor to be CNOT + - factor: i
+    wire1, wire2 = wires
+
+    SQRTY(wire2)
+    
+    SQRTSWAP(wires)
+    Z_b(wire1)
+    SQRTSWAP(wires)
+
+    RZminuspihalf(wire1)
+    RZminuspihalf(wire2)
+    RYminuspihalfb(wire2)
+
+def RZZminuspihalf(wires):
+    wire1, wire2 = wires
+    # exp(-i pi/4) phase factor to be Rzz
+    RZminuspihalf(wire1)
+    RZminuspihalf(wire2)
+    fSim(theta=0,phi=np.pi,wires=wires)
+
+def SWAP(wires):
+    SQRTSWAP(wires)
+    SQRTSWAP(wires)
+
+# Verify all single qubit gates constructed:
+Basis2 = [np.array([1,0,0,0]),np.array([0,1,0,0]),np.array([0,0,1,0]),np.array([0,0,0,1])]
+dev_2qubit = qml.device("default.qubit",wires=2)
+
+@qml.qnode(dev_2qubit)
+def test_2qubit(state,gate):
+    qml.StatePrep(state,wires=[0,1])
+    gate([0,1])
+    return qml.state()
+
+pool_2qubit_gates = [SQRTSWAP,CNOTa,CNOTb,CNOTc,CNOTd,RZZminuspihalf,SWAP]
+phase_factors_2qubit_gates = [(1+1j)/np.sqrt(2),+1j,-1j,-1j,1j,(1-1j)/np.sqrt(2),1j]
+
+true_matrices_2qubits_gates = [
+    np.array([
+        [1,0,0,0],
+        [0,(1+1j)/2,(1-1j)/2,0],
+        [0,(1-1j)/2,(1+1j)/2,0],
+        [0,0,0,1]
+    ])]+[qml.CNOT.compute_matrix()]*4+[
+        qml.PauliRot.compute_matrix(-np.pi/2,'ZZ')
+    ]+[qml.SWAP.compute_matrix()]
+
+for k,(test_gate,true_gate) in enumerate(zip(pool_2qubit_gates,true_matrices_2qubits_gates)):
+    test_gate_sim = np.array([test_2qubit(basis_state,test_gate)*phase_factors_2qubit_gates[k] for basis_state in Basis2]).T
+    assert np.allclose(
+        true_gate,
+        test_gate_sim
+    ), f"failed at {k}: {true_gate} VS {test_gate_sim}"
+
+def Bell_state_prep(wire1,wire2):
+    Hadamard(wire1)
+    CNOTc([wire1,wire2])
+    
+def Trotterized_U(wires,n=3,signature=1):
+    i,j,k = wires
+    
+    for _ in range(n):
+        if signature == 1:
+            RZZminuspihalf([i,j])
+            RZZminuspihalf([j,k])
+            RXminuspihalf(i)
+            RXminuspihalf(j)
+            RXminuspihalf(k)
+    
+        if signature == -1:
+            SQRTX(k)
+            SQRTX(j)
+            SQRTX(i)
+            RZZminuspihalf([j,k])
+            RZZminuspihalf([i,j])
+dev = qml.device('default.qubit', wires = range(7))
+
+@qml.qnode(dev)
+def wormhole_teleportation(g):
+    
+    """ This function implements the wormhole-inspired teleporation protocol
+    using gates native to some superconducting devices.
+    
+    Args:
+        g (float): Parameter for the Wormhole gate as shown in the circuit.
+    
+    Returns:       
+        (float): The expectation value on the sixth wire.
+    """
+    
+
+    pair_list = [[0,5],[1,4],[2,3]]
+    
+    for pair in pair_list:
+        Bell_state_prep(*pair)
+
+    Trotterized_U([0,1,2],signature=-1)
+    SWAP([0,6])
+    Trotterized_U([0,1,2])
+    
+    Wormhole(g=g,wires=[1,2,3,4])
+    
+    Trotterized_U([3,4,5])
+    
+    return qml.expval(qml.PauliZ(5))
+# These functions are responsible for testing the solution.
+
+
+def run(test_case_input: str) -> str:
+    ins = np.array(json.loads(test_case_input))
+    outs = wormhole_teleportation(ins)
+    
+    return str(outs)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    expected_output = json.loads(expected_output)
+    
+    u = wormhole_teleportation(np.pi/4)
+    tape = wormhole_teleportation.qtape
+    names = [op.name for op in tape.operations]
+    
+    assert names.count('Wormhole') == 1, "Can't use Wormhole gate more than once"
+    for op in tape.operations:
+        assert (isinstance(op, SQRTX) or isinstance(op, SQRTY) or isinstance(op, fSim) or isinstance(op, Wormhole)), "You can only use SQRTX, SQRTY, fSim, and Wormhole gates"
+
+    assert np.isclose(solution_output,expected_output, rtol = 1e-4), "Not the correct expectation value"
