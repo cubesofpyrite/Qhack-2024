@@ -1,0 +1,165 @@
+import json
+import pennylane as qml
+import pennylane.numpy as np
+
+# Feel free to create helper functions if needed.
+q_wires = range(3)
+w_wires = range(4)
+c_wires = [3, 4]
+
+def add_1(q_wires):
+    qml.QFT(q_wires) 
+    for w in q_wires:
+        qml.RZ(np.pi / (2**w), [w])
+    qml.adjoint(qml.QFT)(q_wires)  
+
+def CX(c_wires):
+    qml.CNOT([c_wires[0], c_wires[1]])
+
+def is_safe_configuration(oracle):
+    """
+    This is the quantum function where you will solve the problem, make use of the oracle as many times as you think necessary.
+    To use the oracle you can write: oracle(wires = <four wires>).
+    You will only be able to use the wires = [0,1,2,3,4].
+    """
+
+
+    # Put your code here #
+    def do(w_wires):
+        oracle(w_wires)
+        oracle(w_wires)
+
+    def cdo(w_wires):
+        qml.ctrl(oracle, 4, "1")(w_wires)
+        # qml.ctrl(oracle, 4, "1")(w_wires)
+
+    def cdox(w_wires, q_wires, c_wires):
+        cdo(w_wires)
+        add_1(q_wires)
+        cdo(w_wires)
+        add_1(q_wires)
+        CX(c_wires[::-1])
+
+    for i in range(7):
+        do(w_wires)
+        CX(c_wires)
+        add_1(q_wires)
+
+    qml.PauliX(4)
+
+    do(w_wires)
+    add_1(q_wires)
+
+    qml.broadcast(qml.Hadamard, q_wires, 'single')
+
+    for i in range(4):
+        cdox(w_wires, q_wires, c_wires)
+
+    qml.broadcast(qml.Hadamard, q_wires, 'single')
+
+    qml.CNOT([3, 4])
+
+
+def oracle_maker():
+    """
+    This function is responsible for generating an oracle for the problem
+    """
+
+    slices = np.arange(8)
+
+    buildings = np.random.choice(slices, size=2, replace=False)
+
+    if 2 * abs(buildings[0] - buildings[1]) % 8 == 0:
+        target = 1
+    else:
+        target = 0
+
+    def oracle(wires):
+
+        class op(qml.operation.Operation):
+            n_wires = 4
+            grad_method = None
+
+            def __init__(self, wires, id=None):
+                self.hyperparameters["n_wires"] = len(wires)
+                super().__init__(wires=wires, id=id)
+
+            @property
+            def num_params(self):
+                return 0
+
+            @staticmethod
+            def compute_matrix(n_wires):
+                wires = qml.wires.Wires(range(n_wires))
+
+                wires_input = wires[:3]
+                wire_output = wires[3]
+
+                def aux():
+
+                    if buildings[0] != 7:
+                        qml.BasisEmbedding(7 - buildings[0], wires=wires_input)
+                    qml.ctrl(qml.RY(np.pi / 2, wires=wire_output), control=wires_input)
+                    if buildings[0] != 7:
+                        qml.BasisEmbedding(7 - buildings[0], wires=wires_input)
+
+                    if buildings[1] != 7:
+                        qml.BasisEmbedding(7 - buildings[1], wires=wires_input)
+                    qml.ctrl(qml.RY(-np.pi / 2, wires=wire_output), control=wires_input)
+                    if buildings[1] != 7:
+                        qml.BasisEmbedding(7 - buildings[1], wires=wires_input)
+
+                matrix = qml.matrix(aux)()
+
+                return matrix
+
+        return op(wires=wires)
+
+    return oracle, target
+
+
+def run(case: str) -> str:
+    return "No output"
+
+
+def check(have: str, want: str) -> None:
+    for _ in range(500):
+        oracle, target = oracle_maker()
+
+        dev = qml.device("default.qubit", wires=5)
+
+        @qml.qnode(dev)
+        def test_circuit():
+            is_safe_configuration(oracle)
+            return qml.probs(wires=4)
+
+        test_circuit()
+
+        for op in test_circuit.tape.operations:
+            assert not isinstance(op, qml.QubitUnitary), "You cannot use QubitUnitary"
+            assert not isinstance(op, qml.measurements.mid_measure.MidMeasureMP), "You cannot use measurements"
+
+        assert np.isclose(test_circuit()[1], target), "Wrong answer!"
+
+
+# These are the public test cases
+test_cases = [
+    ('No input', 'No output')
+]
+
+# This will run the public test cases locally
+for i, (input_, expected_output) in enumerate(test_cases):
+    print(f"Running test case {i} with input '{input_}'...")
+
+    try:
+        output = run(input_)
+
+    except Exception as exc:
+        print(f"Runtime Error. {exc}")
+
+    else:
+        if message := check(output, expected_output):
+            print(f"Wrong Answer. Have: '{output}'. Want: '{expected_output}'.")
+
+        else:
+            print("Correct!")
