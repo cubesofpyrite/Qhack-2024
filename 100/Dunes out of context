@@ -1,0 +1,54 @@
+dev = qml.device('default.qutrit', wires = 1)
+
+@qml.qnode(dev)
+def prepare_qutrit(chi, eta):
+    """
+    This QNode prepares the state |phi> as defined in the statement and
+    computes the measurement probabilities in the qutrit computational basis.
+    
+    Args: 
+        - chi (float): The angle chi parametrizing the state |phi>.
+        - eta (float): The angle eta parametrizing the state |eta>.
+    Returns:
+        - (np.array(float)): The measurement probabilities in the computational
+        basis after preparing the state.
+    
+    """
+
+    # Put your code here #
+    qml.TRY(np.pi, 0, (0, 2))
+    qml.TRY(2*chi, 0, (0, 2))
+    qml.TRY(2*eta, 0, (0, 1))
+
+    return qml.probs(wires=0)
+    return qml.probs(wires=0)
+
+def evaluate_sum(chi, eta_array):
+    """
+    This QNode computes the sum S as in the statement.
+    
+    Args: 
+        chi (float): The angle chi parametrizing the states |phi_i>.
+        eta_array (float): Contains the angles eta_i parametrizing the state |eta_i>.
+    Returns:
+        (np.array(float)): The sum S as defined in the statement.
+        
+    """
+
+    # Put your code here
+    return sum(prepare_qutrit(chi, eta)[2] for eta in eta_array)
+
+# These functions are responsible for testing the solution.
+
+
+def run(test_case_input: str) -> str:
+    ins = json.loads(test_case_input)
+    outs = evaluate_sum(*ins)
+    
+    return str(outs)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    expected_output = json.loads(expected_output)
+    assert np.allclose(solution_output,expected_output, atol = 1e-4), "Not the correct sum!"
