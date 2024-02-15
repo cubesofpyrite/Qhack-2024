@@ -1,0 +1,105 @@
+# Put any helper functions here that you want to make #
+
+def encode_hermitian(A, wires):
+    """
+    Encodes a hermitian matrix A as a unitary U = e^{iA}.
+
+    Args
+        - A (numpy.tensor): a 2x2 matrix
+        - b (numpy.tensor): a length-2 vector
+
+    Returns
+        - (qml.Operation): a unitary operation U = e^{iA}
+    """
+    return qml.exp(qml.Hermitian(A, wires=wires), coeff=1j)
+
+
+def mint_to_lime(A, b):
+    """
+    Calculates the optimal mint and lime proportions in the Mojito HHLime twist.
+
+    Args
+        - A (numpy.tensor): a 2x2 matrix
+        - b (numpy.tensor): a length-2 vector
+
+    Returns
+        - x (numpy.tensor): the solution to Ax = b
+        (int): the number of operations in your HHL circuit.
+    """
+    b_qubits = 1
+    b_wires = [0]
+
+    qpe_qubits = 10
+    qpe_wires = list(range(b_qubits, b_qubits + qpe_qubits))
+
+    ancilla_qubits = 1
+    ancilla_wires = list(
+        range(b_qubits + qpe_qubits, ancilla_qubits + b_qubits + qpe_qubits)
+    )
+
+    all_wires = b_wires + qpe_wires + ancilla_wires
+    dev = qml.device("default.qubit", wires=all_wires)
+
+    @qml.qnode(dev)
+    def HHL(A, b):
+        """
+        Implements the HHL algorithm.
+        Args
+            - A (numpy.tensor): a 2x2 matrix
+            - b (numpy.tensor): a length-2 vector
+
+        Returns
+            - (numpy.tensor):
+                The probability distribution for the vector x, which is the
+                solution to Ax = b.
+        """
+
+        # Put your code here #
+        # 1. State preparation
+        angle = 2 * np.arccos(b[0])
+        qml.RY(angle, b_wires)
+
+        # 2. QPE
+        U = encode_hermitian(A, b_wires)
+        qml.QuantumPhaseEstimation(U, estimation_wires=qpe_wires)
+
+        # 3. Ancilla bit rotation
+        for i in range(1, 2 ** len(qpe_wires)):
+            angle = 2 * np.arcsin(1 / i)
+
+            binary_r = np.binary_repr(i, width=len(qpe_wires))
+            control_values = list(map(int, binary_r))
+
+            qml.ctrl(qml.RY, qpe_wires, control_values)(angle, ancilla_wires)
+
+        # 4. Postselect on mid-circuit measurement
+        qml.measure(ancilla_wires, postselect=1)
+
+        # 5. Inverse QPE (uncompute)
+        qml.adjoint(qml.QuantumPhaseEstimation)(U, estimation_wires=qpe_wires)
+
+        # 6. Measurement
+        return qml.probs(wires=b_wires)
+
+    # we return probs, but we need the state itself (it will be real-valued)
+    x = np.sqrt(HHL(A, b))
+
+    return x, len(HHL.tape._ops)
+
+# These functions are responsible for testing the solution.
+def run(test_case_input: str) -> str:
+    A, b = json.loads(test_case_input)
+    output, num_ops = mint_to_lime(np.array(A), np.array(b))
+    output = output.tolist()
+    output.append(num_ops)
+    return str(output)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    output = solution_output[:-1]
+    num_ops = solution_output[-1]
+    expected_output = json.loads(expected_output)
+
+    assert num_ops > 4, "Your circuit should have a few more operations!"
+    assert np.allclose(output, expected_output, rtol=1e-2)
