@@ -1,0 +1,94 @@
+                
+# Write any helper functions you need here
+def prepare_state(c0, c1):
+    angle = 2 * np.arccos((c0 + c1) / np.sqrt(2))
+    
+    # |00> ---> |00> + |10>
+    qml.RY(angle, 1)
+
+    n = np.sin(angle / 2)
+    a = np.arcsin(c1 / (n * np.sqrt(2)))
+
+    # |00> + |10> --->  |00> + |10> + |11>
+    qml.RY(a, 2)
+    qml.CNOT([1, 2])
+    qml.RY(-a , 2)
+
+    # SWAP
+    qml.CNOT([1, 2])
+    qml.CNOT([2, 1])
+    qml.CNOT([1, 2])
+dev = qml.device('default.qubit', wires=[0,1,2])
+
+@qml.qnode(dev)
+def cloning_machine(coefficients, wire):
+    
+    """
+    Returns the reduced density matrix on a wire for the cloning machine circuit.
+    
+    Args:
+        - coefficients (np.array(float)): an array [c0,c1] containing the coefficients parametrizing
+        the input state fed into the middle and bottom wires of the cloning machine.
+        wire (int): The wire on which we calculate the reduced density matrix.
+
+    Returns:
+        - np.tensor(complex): The reduced density matrix on wire = wire, as returned by qml.density_matrix.
+    
+    """
+    
+
+    # Put your code here
+    prepare_state(*coefficients)
+
+    qml.CNOT([0, 1])
+    qml.CNOT([0, 2])
+    qml.CNOT([1, 0])
+    qml.CNOT([2, 0])
+
+    # Return the reduced density matrix
+    return qml.density_matrix(wires=wire)
+def fidelity(coefficients):
+    
+    """
+    Calculates the fidelities between the reduced density matrices in wires 0 and 1 and the input state |0>.
+    
+    Args:
+        - coefficients (np.array(float)): an array [c0,c1] containing the coefficients parametrizing
+        the input state fed into the middle and bottom wires of the cloning machine.
+    Returns:
+        - (np.array(float)): An array whose elements are:
+            - 0th element:  The fidelity between the output reduced state on wire 0 and the state |0>.
+            - 1st element:  The fidelity between the output reduced state on wire 1 and the state |0>.    
+    """
+    
+
+    # Put your code here
+    state1 = cloning_machine(coefficients, wire=0)
+    state2 = cloning_machine(coefficients, wire=1)
+    initial_state = np.array([
+        [1, 0],
+        [0, 0]
+    ])
+
+    f1 = qml.math.fidelity(initial_state, state1)
+    f2 = qml.math.fidelity(initial_state, state2)
+
+    return np.array([f1, f2])
+
+# These functions are responsible for testing the solution.
+
+
+def run(test_case_input: str) -> str:
+    ins = json.loads(test_case_input)
+    outs = fidelity(ins).tolist()
+    
+    return str(outs)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    expected_output = json.loads(expected_output)
+    u = cloning_machine([1/np.sqrt(3),1/np.sqrt(3)],1)
+    for op in cloning_machine.tape.operations:
+        assert (isinstance(op, qml.RX) or isinstance(op, qml.RY) or isinstance(op, qml.CNOT)), "You are using forbidden gates!"
+    assert np.allclose(solution_output,expected_output, atol = 1e-4), "Not the correct fidelities"
