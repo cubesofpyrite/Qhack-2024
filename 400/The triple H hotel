@@ -1,0 +1,71 @@
+symbols = ["H", "H", "H"]
+
+
+def h3_ground_energy(bond_length):
+    
+    """
+    Uses VQE to calculate the ground energy of the H3+ molecule with the given bond length.
+    
+    Args:
+        - bond_length(float): The bond length of the H3+ molecule modelled as an
+        equilateral triangle.
+    Returns:
+        - Union[float, np.tensor, np.array]: A float-like output containing the ground 
+        state of the H3+ molecule with the given bond length.
+    """
+    
+
+
+    coordinates = bond_length * np.array([
+        [-1/2, 0.0, 0.0],
+        [-1/2, 0.0, 0.0],
+        [0.0, np.sqrt(3)/2, 0.0]
+    ])
+    
+    coordinates = bond_length * np.array([
+        [-1/2, -np.sqrt(3)/4, 0.0],
+        [1/2, -np.sqrt(3)/4, 0.0],
+        [0.0,   np.sqrt(3)/4, 0.0]
+    ])
+    
+    H, qubits = qml.qchem.molecular_hamiltonian(symbols,coordinates,charge=1)
+    
+    dev = qml.device("default.qubit",wires=qubits)
+    electrons = 2
+    hf = qml.qchem.hf_state(electrons=electrons,orbitals=qubits)
+    
+    @qml.qnode(dev)
+    def circuit(params, wires):
+        qml.BasisState(hf, wires=wires)
+        qml.DoubleExcitation(params[0], wires=[0, 1, 2, 3])
+        qml.DoubleExcitation(params[1], wires=[0, 1, 4, 5])
+        return qml.expval(H)
+    
+    def cost_fn(params):
+        return circuit(params, wires=range(qubits))
+    
+    theta = np.array([0.,0.],requires_grad=True)
+    maxiter = 10
+    energy = [cost_fn(theta)]
+    angles = [theta]
+    
+    opt  = qml.GradientDescentOptimizer(stepsize=0.4)
+    
+    for it in range(maxiter):
+        theta, prev_energy = opt.step_and_cost(cost_fn,theta)
+        energy.append(cost_fn(theta))
+        angles.append(theta)
+    
+    return energy[-1]
+# These functions are responsible for testing the solution.
+
+def run(test_case_input: str) -> str:
+    ins = json.loads(test_case_input)
+    outs = h3_ground_energy(ins)
+    return str(outs)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    expected_output = json.loads(expected_output)
+    assert np.allclose(solution_output,expected_output, atol = 1e-4), "Not the correct ground energy"
