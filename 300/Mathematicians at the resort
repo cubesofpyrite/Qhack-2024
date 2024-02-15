@@ -1,0 +1,29 @@
+dev = qml.device("default.qubit", wires = 5)
+
+@qml.qnode(dev)
+def circuit():
+    """
+    Circuit in which you will prepare the Bell state with the allowed gates.
+    """
+
+    qml.Hadamard(0)
+    qml.QFT([2,1,0])
+    qml.QFT([2,1,0])
+    qml.QFT([4,3,2])
+    qml.QFT([4,3,2])
+    return qml.probs(wires = range(5))
+
+# These functions are responsible for testing the solution
+
+def run(case: str) -> str:
+    return "No output"
+
+def check(have: str, want: str) -> None:
+
+    assert np.isclose(circuit()[0], 0.5), "The state is not correct"
+    assert np.isclose(circuit()[-1], 0.5), "The state is not correct"
+
+    for op in circuit.tape.operations:
+      assert (isinstance(op, qml.Hadamard) or isinstance(op, qml.T) or isinstance(op, qml.QFT)), f"You can only use Hadamard, T and QFT operators. You are using {op.name}"
+      if isinstance(op, qml.QFT):
+        assert len(op.wires) == 3, "QFT must act on 3 wires"
