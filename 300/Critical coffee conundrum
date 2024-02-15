@@ -1,0 +1,170 @@
+class AbsMagnetization(qml.measurements.StateMeasurement):
+    """A measurement class that estimates <|M|>."""
+
+    def process_state(self, state, wire_order):
+        """Calculates <|M|>.
+
+        Args:
+            state (Sequence[complex]): quantum state with a flat shape. It may also have an
+                optional batch dimension.
+
+            wire_order (Wires): wires determining the subspace that the state acts on; a matrix of
+                dimension 2**n that acts on a subspace of n wires
+        
+        Returns: 
+            abs_mag (float): <|M|>
+
+        
+        See the docs for more information:
+        https://docs.pennylane.ai/en/stable/code/api/pennylane.measurements.StateMeasurement.html
+        """
+
+        state = qml.state().process_state(state, wire_order)
+
+        try:
+            real_state = state._value
+        except Exception as e:
+            real_state = state
+        
+        # Put your code here #
+        # n = len(wire_order)
+        
+        N = len(real_state)
+        n = int(np.log2(N))
+        
+        Z_n = np.array([np.kron(
+            np.identity(2**n_qubit).numpy(),
+            np.kron(
+                np.array([[1.,0.],[0.,-1.]]),
+                np.identity(2**(n-1-n_qubit)).numpy()
+            ),requires_grad=False
+        ) for n_qubit in range(n)])
+        
+        absM = np.array([np.conj(state[k])*state[k]* np.abs(np.sum(Z_n[:,k,k])) for k in range(N)])
+    
+        # return <|M|>
+        return np.real_if_close(np.sum(absM))
+def tfim_ground_state(num_qubits, h):
+    """Calculates the ground state of the 1D TFIM Hamiltonian.
+
+    Args:
+        num_qubits (int): The number of qubits / spins.
+        h (float): The transverse field strength.
+
+    Returns:
+        (numpy.tensor): The ground state.
+    """
+
+    # Ising Hamiltonian
+    zz_obs = [qml.PauliZ(i)@qml.PauliZ(j) for i in range(num_qubits) for j in range(i+1,num_qubits) if np.abs(i-j)==1]
+    x_obs = [qml.PauliX(i) for i in range(num_qubits)]
+    
+    zz_coeffs = [-1.]*len(zz_obs)
+    x_ceoffs = [-h]*len(x_obs)
+    
+    H = qml.Hamiltonian(zz_coeffs+x_ceoffs,zz_obs+x_obs)
+    H.compute_grouping()
+    # # Find GS
+    # dev1 = qml.device('lightning.qubit', wires=list(range(num_qubits)))
+
+    # shape = qml.StronglyEntanglingLayers.shape(n_layers=3, n_wires=num_qubits)
+    # weights = np.random.random(size=shape)
+    
+    # @qml.qnode(dev1)
+    # def ansatz(params):    
+    #     qml.StronglyEntanglingLayers(weights=params, wires=list(range(num_qubits)))
+    #     return qml.expval(H)
+    
+    # # qml.draw_mpl(ansatz)(weights)
+    # # qml.draw(ansatz)(weights)
+    
+    # opt = qml.GradientDescentOptimizer(stepsize=0.4)
+    # maxiter = 100
+    # energy = [0.]
+    # angles = [weights]
+    
+    # for it in range(maxiter):
+    #     weights,cost = opt.step_and_cost(ansatz,weights)
+    #     energy.append(cost)
+    #     angles.append(weights)
+
+    # @qml.qnode(dev1)
+    # def GS_calc(params):
+    #     qml.StronglyEntanglingLayers(weights=params, wires=list(range(num_qubits)))
+    #     return qml.state()
+
+    # state = GS_calc(angles[-1])
+    # state_list = state.tolist()
+    # return np.array(state_list, requires_grad=False)
+    # dev2 = qml.device('default.qubit', wires=list(range(num_qubits)))
+    # @qml.qnode(dev2)
+    # def GS_calc(params):
+    #     op = qml.StronglyEntanglingLayers(weights=params, wires=list(range(num_qubits)))
+    #     return qml.state()
+    # return qml.StatePrep(GS_calc(angles[-1]).numpy(),wires=list(range(num_qubits)))
+    # return np.array(), requires_grad=False)
+
+    (eigenvalues, eigenvectors) = qml.math.linalg.eigh(qml.matrix(H))
+
+    index = eigenvalues.argmin()
+    ground_state = eigenvectors[:,index]
+
+    return ground_state # return the ground state of the 1D TFIM HamiltonianHamiltonian
+dev = qml.device("default.qubit")
+
+
+@qml.qnode(dev)
+def magnetization(num_qubits, h):
+    """Calculates the absolute value of the magnetization of the 1D TFIM
+    Hamiltonian.
+
+    Args:
+        num_qubits (int): The number of qubits / spins.
+        h (float): The transverse field strength.
+
+    Returns:
+        (float): <|M|>.
+    """
+
+    wires = list(range(num_qubits))
+    gs = tfim_ground_state(num_qubits, h)
+    qml.StatePrep(gs,wires=wires)
+    return AbsMagnetization(wires=wires)
+def critical_point_estimate(mags, h_values):
+    """Provides a finite-size estimate of the critical point of the 1D TFIM
+    Hamiltonian. The estimate is done by taking the average value of h for which
+    adjacent values of <|M|> differ the most.
+
+    Args:
+        mags (numpy.tensor):
+            <|M|> values for various values of h (the transverse field strength).
+        h_values (numpy.tensor): The transverse field strength values.
+
+    Returns:
+        (float): The critical point estimate, h_c.
+    """
+    differences = [np.abs(mags[i] - mags[i + 1]) for i in range(len(mags) - 1)]
+    ind = np.argmax(np.array(differences))
+
+    h_c = np.mean([h_values[ind], h_values[ind + 1]])
+    return h_c
+
+# These functions are responsible for testing the solution.
+def run(test_case_input: str) -> str:
+    num_qubits = json.loads(test_case_input)
+    h_values = np.arange(0.2, 1.1, 0.005)
+    mags = []
+
+    for h in h_values:
+        mags.append(magnetization(num_qubits, h) / num_qubits)
+
+    output = critical_point_estimate(np.array(mags), h_values)
+
+    return str(output)
+
+
+def check(solution_output: str, expected_output: str) -> None:
+    solution_output = json.loads(solution_output)
+    expected_output = json.loads(expected_output)
+
+    assert np.isclose(solution_output, expected_output, rtol=5e-3)
