@@ -1,0 +1,93 @@
+def circuit(oracle):
+    """The circuit to find if the Bitland Kingdom was in danger.
+    You can query the oracle by calling oracle(wires=[0, 1, 2])."""
+    
+
+    # Put your code here #
+    qml.broadcast(qml.Hadamard, range(3), 'single')
+
+    oracle(wires=[0, 1, 2])
+
+    qml.FlipSign([0, 1], [0, 1])
+    qml.FlipSign([1, 0], [0, 1])
+    
+    qml.broadcast(qml.Hadamard, range(3), 'single')
+
+    qml.CNOT([0, 2])
+    qml.CNOT([1, 2])
+# These functions are responsible for testing the solution.
+
+def oracle_maker():
+    # States order: |0> , |1>, -|0>, -|1>
+
+    indx = [[0, 0], [1, 0], [1, 1], [0, 1]]
+
+    # Village 00 -> |0>
+    # Village 10 -> |1>
+    # Village 11 -> -|0>
+    # Village 01 -> -|1>
+
+    np.random.shuffle(indx)
+
+    indices_00 = [index for index, value in enumerate(indx) if value == [0, 0]]
+    indices_11 = [index for index, value in enumerate(indx) if value == [1, 1]]
+
+    if set([indices_00[0], indices_11[0]]) == set([0, 1]) or set([indices_00[0], indices_11[0]]) == set([2, 3]):
+        target = 0
+    else:
+        target = 1
+
+    def oracle(wires):
+
+        class op(qml.operation.Operation):
+            num_wires = 3
+            grad_method = None
+
+            def __init__(self, wires, id=None):
+                super().__init__(wires=wires, id=id)
+
+            @property
+            def num_params(self):
+                return 0
+
+            @staticmethod
+            def compute_decomposition(wires):
+                wires_input = wires[:2]
+                wire_output = wires[2]
+
+                ops = []
+                ops.append(qml.ctrl(qml.PauliX(wires=wire_output), control=wires_input, control_values=indx[1]))
+
+                ops.append(
+                    qml.ctrl(qml.GlobalPhase(np.pi, wires=wire_output), control=wires_input, control_values=indx[2]))
+
+                ops.append(qml.ctrl(qml.PauliX(wires=wire_output), control=wires_input, control_values=indx[3]))
+                ops.append(
+                    qml.ctrl(qml.GlobalPhase(np.pi, wires=wire_output), control=wires_input, control_values=indx[3]))
+
+                return ops
+
+        return op(wires=wires)
+
+    return oracle, target
+
+
+def run(case: str) -> str:
+    return "No output"
+
+
+def check(have: str, want: str) -> None:
+    for _ in range(100):
+        oracle, target = oracle_maker()
+
+        dev = qml.device("default.qubit", wires=3)
+
+        @qml.qnode(dev)
+        def test_circuit():
+            circuit(oracle)
+            return qml.probs(wires=2)
+
+        test_circuit()
+        assert [op.name for op in test_circuit.tape.operations].count("op") == 1, "You can use the oracle once."
+
+        assert np.isclose(test_circuit()[1], target), "Wrong answer!"
