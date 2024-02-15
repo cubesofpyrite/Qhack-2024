@@ -1,0 +1,38 @@
+def U():
+    """
+    Creates the gate that checks the parity of the number of forests.
+    It should not return anything, you simply need to add the gates.
+    """
+
+    # Put your code here #
+    wires_input = list(range(8))
+    wire_aux = 8
+    
+    for i in range(len(wires_input) - 1):
+        qml.MultiControlledX(wires_input[i:i+2], wire_aux, '10')
+    
+    qml.CNOT([wires_input[-1], wire_aux])
+# These functions are responsible for testing the solution.
+
+
+def run(test_case_input: str) -> str:
+
+    input = json.loads(test_case_input)
+    wires_input = [0,1,2,3,4,5,6,7]
+
+    dev = qml.device("default.qubit", wires = 10, shots = 10)
+
+    @qml.qnode(dev)
+    def circuit():
+      qml.BasisEmbedding(input, wires = wires_input)
+
+      U()
+
+      return qml.probs(wires = 8)
+
+    return str(float(circuit()[1]))
+
+
+def check(have: str, want: str) -> None:
+
+    assert np.isclose(float(have), float(want)), "Wrong answer!"
